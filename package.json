@@ -1,0 +1,50 @@
+{
+  "name": "iterm2-mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for reading iTerm2 pane contents - allows AI assistants to see terminal output",
+  "main": "dist/index.js",
+  "bin": {
+    "iterm2-mcp-server": "dist/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/index.js",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mcp",
+    "iterm2",
+    "terminal",
+    "claude",
+    "ai",
+    "model-context-protocol"
+  ],
+  "author": "Sumeru Chatterjee",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anthropics/iterm2-mcp-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/anthropics/iterm2-mcp-server/issues"
+  },
+  "homepage": "https://github.com/anthropics/iterm2-mcp-server#readme",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "files": [
+    "dist",
+    "python",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "typescript": "^5.3.0"
+  }
+}

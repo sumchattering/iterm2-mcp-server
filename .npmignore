@@ -1,0 +1,17 @@
+# Source files (dist is published instead)
+src/
+
+# Config files
+tsconfig.json
+.gitignore
+.github/
+
+# Development files
+*.log
+.DS_Store
+.vscode/
+.idea/
+
+# Tests
+__tests__/
+coverage/
