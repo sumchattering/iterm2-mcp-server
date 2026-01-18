@@ -57,55 +57,39 @@ Add to your Claude Desktop configuration file (`~/Library/Application Support/Cl
 
 ### Claude Code
 
-Add to your Claude Code MCP settings:
+Add the MCP server using the CLI:
 
-```json
-{
-  "mcpServers": {
-    "iterm2": {
-      "command": "npx",
-      "args": ["iterm2-mcp-server"]
-    }
-  }
-}
+```bash
+claude mcp add --scope user iterm2 -- npx github:sumchattering/iterm2-mcp-server
 ```
+
+This installs it globally so it's available in all your projects. You can verify it's working:
+
+```bash
+claude mcp list
+```
+
+You should see: `iterm2: npx github:sumchattering/iterm2-mcp-server - ✓ Connected`
 
 ## Available Tools
 
-### `iterm2_status`
-
-Check if iTerm2 Python API is properly configured and ready to use.
-
 ### `iterm2_list_panes`
 
-List all iTerm2 windows, tabs, and panes with their:
-- Session IDs
-- Names
-- Working directories
-- Running jobs
-- Which pane is current (marked with `<-- CURRENT`)
+List all iTerm2 windows, tabs, and panes with their shorthand IDs, names, working directories, and running jobs.
 
 ### `iterm2_read_pane`
 
-Read the screen buffer contents of a specific pane by its session ID.
+Read the screen buffer contents of a specific pane.
 
 **Parameters:**
-- `session_id` (required): The session ID of the pane to read (e.g., `w0t0p0:ABC123...`)
-
-### `iterm2_current_pane`
-
-Get information about the current iTerm2 pane where the MCP server is running.
-
-### `iterm2_enable_api`
-
-Enable the iTerm2 Python API in preferences. Note: iTerm2 must be restarted after enabling.
+- `session_id` (required): The pane ID using shorthand like `t3p1` (tab 3, pane 1) or `w1t3p1`
 
 ### `iterm2_send_text`
 
 Send text or commands to an iTerm2 pane as if typed by the user.
 
 **Parameters:**
-- `session_id` (required): The session ID of the pane to send text to
+- `session_id` (required): The pane ID (e.g., `t3p1`)
 - `text` (required): The text or command to send
 - `newline` (optional, default: true): Whether to press Enter after the text
 
@@ -114,28 +98,68 @@ Send text or commands to an iTerm2 pane as if typed by the user.
 Send control characters like Ctrl+C, Ctrl+D, Ctrl+Z, or Ctrl+L to an iTerm2 pane.
 
 **Parameters:**
-- `session_id` (required): The session ID of the pane
-- `control` (required): The control character to send: `c` (interrupt), `d` (EOF), `z` (suspend), `l` (clear)
+- `session_id` (required): The pane ID (e.g., `t3p1`)
+- `control` (required): `c` (Ctrl+C), `d` (Ctrl+D), `z` (Ctrl+Z), `l` (Ctrl+L)
 
 ### `iterm2_split_pane`
 
 Split an iTerm2 pane horizontally or vertically, creating a new pane.
 
 **Parameters:**
-- `session_id` (required): The session ID of the pane to split
+- `session_id` (required): The pane ID to split (e.g., `t3p1`)
 - `vertical` (optional, default: false): If true, split vertically (side by side)
 
-## Example Usage
+### `iterm2_current_pane`
 
-Once configured, you can ask Claude:
+Get information about the current iTerm2 pane where Claude Code is running.
 
-- "What's running in my other terminal tabs?"
-- "Can you see the output from my npm server in the other pane?"
-- "Read the contents of the terminal running my Python script"
-- "List all my open terminal panes"
-- "Run `npm test` in my other terminal"
-- "Stop the process running in that pane" (sends Ctrl+C)
-- "Split my terminal and run the server in the new pane"
+### `iterm2_status`
+
+Check if iTerm2 Python API is properly configured and ready to use.
+
+### `iterm2_enable_api`
+
+Enable the iTerm2 Python API in preferences. Note: iTerm2 must be restarted after enabling.
+
+## Pane IDs
+
+Panes are identified using shorthand IDs that match iTerm2's UI (1-based indexing):
+
+- `t3p1` - Tab 3, Pane 1 (assumes Window 1)
+- `t3p2` - Tab 3, Pane 2
+- `w1t3p1` - Window 1, Tab 3, Pane 1 (explicit window)
+- `w2t1p1` - Window 2, Tab 1, Pane 1
+
+Use `iterm2_list_panes` to see all available panes and their IDs.
+
+## Using with Claude Code
+
+Once installed, Claude Code can see and interact with your terminal panes. Here are effective ways to use it:
+
+### Asking about panes
+
+- "What's in tab 3?" - Claude will read the contents of tab 3
+- "What's running in the pane next to you?" - Claude can identify adjacent panes
+- "Show me all my terminal tabs" - Lists all panes with their shorthand IDs
+- "What's the output of my server?" - Claude can find and read server output
+
+### Running commands in other panes
+
+- "Run `npm test` in t3p1" - Sends command to specific pane
+- "Stop the process in tab 4" - Sends Ctrl+C to interrupt
+- "Clear the terminal in t2p1" - Sends Ctrl+L
+
+### Working with multiple panes
+
+- "Split my terminal and run the dev server in the new pane"
+- "What errors are showing in my other terminals?"
+- "Compare the output in tab 2 and tab 3"
+
+### Tips for effective queries
+
+1. **Be specific about location**: "tab 3" or "t3p1" is clearer than "the other terminal"
+2. **Reference the pane list**: Ask Claude to list panes first if you're unsure of the layout
+3. **Use relative references**: "the pane next to you" or "the tab on the left" work too
 
 ## Troubleshooting
 
@@ -193,7 +217,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 The following features are being considered for future releases. Feedback welcome!
 
-- **Shorthand session IDs**: Support `w0t1p0` format instead of full UUIDs for easier use
 - **Create tab/window**: `iterm2_create_tab` and `iterm2_create_window` tools
 - **Close pane**: `iterm2_close_pane` tool to close panes programmatically
 - **Focus pane**: `iterm2_focus_pane` to bring a specific pane to the foreground
