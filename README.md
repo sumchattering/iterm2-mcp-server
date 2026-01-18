@@ -140,7 +140,7 @@ This MCP server uses the [iTerm2 Python API](https://iterm2.com/python-api/) to 
 
 ```bash
 # Clone the repository
-git clone https://github.com/anthropics/iterm2-mcp-server.git
+git clone https://github.com/sumchattering/iterm2-mcp-server.git
 cd iterm2-mcp-server
 
 # Install dependencies

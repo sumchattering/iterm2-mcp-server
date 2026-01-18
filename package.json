@@ -25,12 +25,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/anthropics/iterm2-mcp-server.git"
+    "url": "git+https://github.com/sumchattering/iterm2-mcp-server.git"
   },
   "bugs": {
-    "url": "https://github.com/anthropics/iterm2-mcp-server/issues"
+    "url": "https://github.com/sumchattering/iterm2-mcp-server/issues"
   },
-  "homepage": "https://github.com/anthropics/iterm2-mcp-server#readme",
+  "homepage": "https://github.com/sumchattering/iterm2-mcp-server#readme",
   "engines": {
     "node": ">=18.0.0"
   },
