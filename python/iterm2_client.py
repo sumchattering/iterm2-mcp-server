@@ -50,8 +50,15 @@ def enable_api():
 
 
 def get_current_session_from_env():
-    """Get the current session ID from environment."""
-    return os.environ.get("ITERM_SESSION_ID", "")
+    """Get the current session ID from environment.
+
+    ITERM_SESSION_ID format is 'w0t4p0:UUID' - we extract just the UUID part.
+    """
+    session_id = os.environ.get("ITERM_SESSION_ID", "")
+    # The format is 'w0t4p0:UUID', we want just the UUID
+    if ":" in session_id:
+        return session_id.split(":", 1)[1]
+    return session_id
 
 
 def parse_shorthand_id(shorthand):
