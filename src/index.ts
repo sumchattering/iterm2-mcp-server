@@ -82,6 +82,7 @@ function formatPaneList(data: PythonResult): string {
       sessions: Array<{
         index: number;
         id: string;
+        shorthand: string;
         name: string;
         cwd: string;
         job: string;
@@ -93,8 +94,8 @@ function formatPaneList(data: PythonResult): string {
   let output = "iTerm2 Panes:\n";
   output += "=".repeat(60) + "\n";
 
-  if (data.current_session_id) {
-    output += `Current session: ${data.current_session_id}\n`;
+  if (data.current_shorthand) {
+    output += `You are here: ${data.current_shorthand}\n`;
   }
 
   for (const window of windows) {
@@ -104,8 +105,8 @@ function formatPaneList(data: PythonResult): string {
       output += `  [Tab ${tab.index}]\n`;
 
       for (const session of tab.sessions) {
-        const marker = session.is_current ? " <-- CURRENT" : "";
-        output += `    [Pane ${session.index}] ${session.id}${marker}\n`;
+        const marker = session.is_current ? " <-- YOU ARE HERE" : "";
+        output += `    ${session.shorthand}${marker}\n`;
         if (session.name) output += `      Name: ${session.name}\n`;
         if (session.cwd) output += `      CWD:  ${session.cwd}\n`;
         if (session.job) output += `      Job:  ${session.job}\n`;
@@ -149,7 +150,7 @@ function createServer(): Server {
         {
           name: "iterm2_list_panes",
           description:
-            "List all iTerm2 windows, tabs, and panes with their session IDs, names, working directories, and running jobs. Shows which pane is the current one.",
+            "List all iTerm2 windows, tabs, and panes with their shorthand IDs (like t5p2), names, working directories, and running jobs. Shows which pane you are in. Use these shorthand IDs with other tools.",
           inputSchema: {
             type: "object",
             properties: {},
@@ -159,14 +160,14 @@ function createServer(): Server {
         {
           name: "iterm2_read_pane",
           description:
-            "Read the screen buffer contents of a specific iTerm2 pane by its session ID. Returns the visible text in the terminal.",
+            "Read the screen buffer contents of a specific iTerm2 pane. Returns the visible text in the terminal.",
           inputSchema: {
             type: "object",
             properties: {
               session_id: {
                 type: "string",
                 description:
-                  "The session ID of the pane to read (e.g., 'w0t0p0:ABC123...'). Use iterm2_list_panes to find session IDs.",
+                  "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2' (window 1, tab 5, pane 2). Numbers are 1-based to match iTerm2's UI.",
               },
             },
             required: ["session_id"],
@@ -202,7 +203,7 @@ function createServer(): Server {
               session_id: {
                 type: "string",
                 description:
-                  "The session ID of the pane to send text to (e.g., 'w0t0p0:ABC123...'). Use iterm2_list_panes to find session IDs.",
+                  "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2'. Numbers are 1-based.",
               },
               text: {
                 type: "string",
@@ -228,7 +229,7 @@ function createServer(): Server {
               session_id: {
                 type: "string",
                 description:
-                  "The session ID of the pane to send the control character to.",
+                  "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2'. Numbers are 1-based.",
               },
               control: {
                 type: "string",
@@ -249,7 +250,8 @@ function createServer(): Server {
             properties: {
               session_id: {
                 type: "string",
-                description: "The session ID of the pane to split.",
+                description:
+                  "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2'. Numbers are 1-based.",
               },
               vertical: {
                 type: "boolean",
@@ -351,7 +353,7 @@ function createServer(): Server {
             };
           }
 
-          let output = `Pane Contents (${result.session_id}):\n`;
+          let output = `Pane Contents (${result.shorthand}):\n`;
           output += "=".repeat(60) + "\n";
           if (result.name) output += `Name: ${result.name}\n`;
           if (result.cwd) output += `CWD: ${result.cwd}\n`;
@@ -384,7 +386,7 @@ function createServer(): Server {
           };
 
           let output = "Current Pane:\n";
-          output += `- Session ID: ${result.session_id}\n`;
+          output += `- Shorthand: ${result.shorthand}\n`;
           output += `- Name: ${result.name || "(unnamed)"}\n`;
           output += `- Working Directory: ${result.cwd || "N/A"}\n`;
           output += `- Running Job: ${result.job || "N/A"}\n`;
@@ -455,7 +457,7 @@ function createServer(): Server {
             };
           }
 
-          let output = `Text sent to pane ${sessionId}:\n`;
+          let output = `Text sent to pane ${result.shorthand}:\n`;
           output += `- Text: "${result.text_sent}"\n`;
           output += `- Newline: ${result.newline ? "Yes (Enter pressed)" : "No"}`;
 
@@ -502,7 +504,7 @@ function createServer(): Server {
             content: [
               {
                 type: "text",
-                text: `Sent ${result.description} to pane ${sessionId}`,
+                text: `Sent ${result.description} to pane ${result.shorthand}`,
               },
             ],
           };
@@ -540,9 +542,10 @@ function createServer(): Server {
           }
 
           let output = `Pane split successfully!\n`;
-          output += `- Original pane: ${result.original_session_id}\n`;
-          output += `- New pane: ${result.new_session_id}\n`;
-          output += `- Direction: ${result.split_direction}`;
+          output += `- Original pane: ${result.original_shorthand}\n`;
+          output += `- New pane ID: ${result.new_session_id}\n`;
+          output += `- Direction: ${result.split_direction}\n`;
+          output += `\nUse iterm2_list_panes to see the new pane's shorthand.`;
 
           return {
             content: [{ type: "text", text: output }],

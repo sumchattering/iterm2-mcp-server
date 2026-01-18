@@ -54,6 +54,74 @@ def get_current_session_from_env():
     return os.environ.get("ITERM_SESSION_ID", "")
 
 
+def parse_shorthand_id(shorthand):
+    """
+    Parse a shorthand session ID like 't4p2' or 'w1t4p2' into indices.
+    Uses 1-based indexing to match iTerm2's UI.
+    Returns (window_idx, tab_idx, pane_idx) as 0-based indices for internal use,
+    or None if the format is invalid.
+    """
+    import re
+
+    # Match patterns like "t4p2" or "w1t4p2"
+    match = re.match(r'^(?:w(\d+))?t(\d+)p(\d+)$', shorthand.lower())
+    if not match:
+        return None
+
+    window = int(match.group(1)) if match.group(1) else 1  # Default to window 1
+    tab = int(match.group(2))
+    pane = int(match.group(3))
+
+    # Convert from 1-based (user) to 0-based (internal)
+    return (window - 1, tab - 1, pane - 1)
+
+
+async def resolve_session_id(app, session_id_or_shorthand):
+    """
+    Resolve a session ID from either a full UUID or shorthand format.
+    Returns (session, shorthand_str) or exits with error.
+    """
+    # Check if it's a shorthand format
+    indices = parse_shorthand_id(session_id_or_shorthand)
+
+    if indices:
+        window_idx, tab_idx, pane_idx = indices
+
+        if window_idx < 0 or window_idx >= len(app.windows):
+            output_error(
+                f"Window {window_idx + 1} not found (have {len(app.windows)} windows)",
+                "SESSION_NOT_FOUND"
+            )
+
+        window = app.windows[window_idx]
+        if tab_idx < 0 or tab_idx >= len(window.tabs):
+            output_error(
+                f"Tab {tab_idx + 1} not found in window {window_idx + 1} (have {len(window.tabs)} tabs)",
+                "SESSION_NOT_FOUND"
+            )
+
+        tab = window.tabs[tab_idx]
+        if pane_idx < 0 or pane_idx >= len(tab.sessions):
+            output_error(
+                f"Pane {pane_idx + 1} not found in tab {tab_idx + 1} (have {len(tab.sessions)} panes)",
+                "SESSION_NOT_FOUND"
+            )
+
+        session = tab.sessions[pane_idx]
+        shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{pane_idx + 1}"
+        return session, shorthand
+
+    # Otherwise, search for the full session ID
+    for window_idx, window in enumerate(app.windows):
+        for tab_idx, tab in enumerate(window.tabs):
+            for pane_idx, session in enumerate(tab.sessions):
+                if session.session_id == session_id_or_shorthand:
+                    shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{pane_idx + 1}"
+                    return session, shorthand
+
+    output_error(f"Session '{session_id_or_shorthand}' not found", "SESSION_NOT_FOUND")
+
+
 def output_json(data):
     """Output data as JSON."""
     print(json.dumps(data, indent=2))
@@ -81,27 +149,38 @@ async def list_panes():
     app = await iterm2.async_get_app(connection)
     current_session_id = get_current_session_from_env()
 
+    # Find current session shorthand
+    current_shorthand = None
+    for window_idx, window in enumerate(app.windows):
+        for tab_idx, tab in enumerate(window.tabs):
+            for pane_idx, session in enumerate(tab.sessions):
+                if session.session_id == current_session_id:
+                    current_shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{pane_idx + 1}"
+                    break
+
     result = {
         "current_session_id": current_session_id,
+        "current_shorthand": current_shorthand,
         "windows": []
     }
 
     for window_idx, window in enumerate(app.windows):
         window_data = {
-            "index": window_idx,
+            "index": window_idx + 1,  # 1-based
             "id": window.window_id,
             "tabs": []
         }
 
         for tab_idx, tab in enumerate(window.tabs):
             tab_data = {
-                "index": tab_idx,
+                "index": tab_idx + 1,  # 1-based
                 "id": tab.tab_id,
                 "sessions": []
             }
 
             for session_idx, session in enumerate(tab.sessions):
                 session_id = session.session_id
+                shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
 
                 # Get session details
                 name = await session.async_get_variable("name") or ""
@@ -110,8 +189,9 @@ async def list_panes():
                 job_name = await session.async_get_variable("jobName") or ""
 
                 session_data = {
-                    "index": session_idx,
+                    "index": session_idx + 1,  # 1-based
                     "id": session_id,
+                    "shorthand": shorthand,
                     "name": name,
                     "tty": tty,
                     "cwd": cwd,
@@ -128,7 +208,7 @@ async def list_panes():
     output_json(result)
 
 
-async def read_pane(session_id):
+async def read_pane(session_id_or_shorthand):
     """Read the contents of a specific pane."""
     import iterm2
 
@@ -142,24 +222,8 @@ async def read_pane(session_id):
 
     app = await iterm2.async_get_app(connection)
 
-    # Find the session
-    target_session = None
-    session_info = None
-
-    for window_idx, window in enumerate(app.windows):
-        for tab_idx, tab in enumerate(window.tabs):
-            for session_idx, session in enumerate(tab.sessions):
-                if session.session_id == session_id:
-                    target_session = session
-                    session_info = {
-                        "window": window_idx,
-                        "tab": tab_idx,
-                        "pane": session_idx
-                    }
-                    break
-
-    if target_session is None:
-        output_error(f"Session '{session_id}' not found", "SESSION_NOT_FOUND")
+    # Resolve the session (supports both shorthand and full UUID)
+    target_session, shorthand = await resolve_session_id(app, session_id_or_shorthand)
 
     # Read screen contents
     try:
@@ -178,10 +242,10 @@ async def read_pane(session_id):
         cwd = await target_session.async_get_variable("path") or ""
 
         output_json({
-            "session_id": session_id,
+            "session_id": target_session.session_id,
+            "shorthand": shorthand,
             "name": name,
             "cwd": cwd,
-            "location": session_info,
             "contents": "\n".join(lines)
         })
 
@@ -216,17 +280,19 @@ async def get_current_pane():
                     tty = await session.async_get_variable("tty") or ""
                     cwd = await session.async_get_variable("path") or ""
                     job_name = await session.async_get_variable("jobName") or ""
+                    shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
 
                     output_json({
                         "session_id": current_session_id,
+                        "shorthand": shorthand,
                         "name": name,
                         "tty": tty,
                         "cwd": cwd,
                         "job": job_name,
                         "location": {
-                            "window": window_idx,
-                            "tab": tab_idx,
-                            "pane": session_idx
+                            "window": window_idx + 1,  # 1-based
+                            "tab": tab_idx + 1,        # 1-based
+                            "pane": session_idx + 1    # 1-based
                         }
                     })
                     return
@@ -234,8 +300,8 @@ async def get_current_pane():
     output_error(f"Current session '{current_session_id}' not found", "SESSION_NOT_FOUND")
 
 
-async def find_session(session_id):
-    """Find a session by ID. Returns (connection, session) or exits with error."""
+async def find_session(session_id_or_shorthand):
+    """Find a session by ID or shorthand. Returns (connection, session, shorthand) or exits with error."""
     import iterm2
 
     try:
@@ -244,19 +310,14 @@ async def find_session(session_id):
         output_error(f"Failed to connect to iTerm2: {e}", "CONNECTION_FAILED")
 
     app = await iterm2.async_get_app(connection)
+    session, shorthand = await resolve_session_id(app, session_id_or_shorthand)
 
-    for window in app.windows:
-        for tab in window.tabs:
-            for session in tab.sessions:
-                if session.session_id == session_id:
-                    return connection, session
-
-    output_error(f"Session '{session_id}' not found", "SESSION_NOT_FOUND")
+    return connection, session, shorthand
 
 
 async def send_text(session_id, text, newline=True):
     """Send text to a specific pane."""
-    connection, session = await find_session(session_id)
+    connection, session, shorthand = await find_session(session_id)
 
     try:
         text_to_send = text + "\n" if newline else text
@@ -264,7 +325,8 @@ async def send_text(session_id, text, newline=True):
 
         output_json({
             "success": True,
-            "session_id": session_id,
+            "session_id": session.session_id,
+            "shorthand": shorthand,
             "text_sent": text,
             "newline": newline
         })
@@ -288,14 +350,15 @@ async def send_control(session_id, control):
             "INVALID_CONTROL"
         )
 
-    connection, session = await find_session(session_id)
+    connection, session, shorthand = await find_session(session_id)
 
     try:
         await session.async_send_text(control_chars[control])
 
         output_json({
             "success": True,
-            "session_id": session_id,
+            "session_id": session.session_id,
+            "shorthand": shorthand,
             "control": control,
             "description": {
                 "c": "Ctrl+C (SIGINT)",
@@ -310,14 +373,17 @@ async def send_control(session_id, control):
 
 async def split_pane(session_id, vertical=False):
     """Split a pane horizontally or vertically."""
-    connection, session = await find_session(session_id)
+    connection, session, shorthand = await find_session(session_id)
 
     try:
         new_session = await session.async_split_pane(vertical=vertical)
 
+        # Note: We can't easily get the new pane's shorthand without re-listing
+        # The new pane will be adjacent to the original
         output_json({
             "success": True,
-            "original_session_id": session_id,
+            "original_session_id": session.session_id,
+            "original_shorthand": shorthand,
             "new_session_id": new_session.session_id,
             "split_direction": "vertical" if vertical else "horizontal"
         })
