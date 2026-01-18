@@ -391,9 +391,83 @@ async def split_pane(session_id, vertical=False):
         output_error(f"Failed to split pane: {e}", "SPLIT_FAILED")
 
 
+async def get_side_pane():
+    """Get a side pane in the same tab as the current pane.
+
+    Prefers the pane to the right, but falls back to left if current is rightmost.
+    """
+    import iterm2
+
+    current_session_id = get_current_session_from_env()
+
+    if not current_session_id:
+        output_error(
+            "Not running in an iTerm2 session (ITERM_SESSION_ID not set)",
+            "NOT_IN_ITERM"
+        )
+
+    try:
+        connection = await iterm2.Connection.async_create()
+    except Exception as e:
+        output_error(f"Failed to connect to iTerm2: {e}", "CONNECTION_FAILED")
+
+    app = await iterm2.async_get_app(connection)
+
+    # Find current session and its location
+    for window_idx, window in enumerate(app.windows):
+        for tab_idx, tab in enumerate(window.tabs):
+            for session_idx, session in enumerate(tab.sessions):
+                if session.session_id == current_session_id:
+                    # Found current session, now find a side pane
+                    num_panes = len(tab.sessions)
+
+                    if num_panes == 1:
+                        output_error(
+                            "No side pane found - this is the only pane in the tab",
+                            "NO_SIDE_PANE"
+                        )
+
+                    # Prefer pane to the right (higher index)
+                    if session_idx + 1 < num_panes:
+                        side_idx = session_idx + 1
+                    else:
+                        # Fall back to pane on the left (lower index)
+                        side_idx = session_idx - 1
+
+                    side_session = tab.sessions[side_idx]
+                    side_shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{side_idx + 1}"
+                    current_shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
+
+                    # Get side pane details
+                    name = await side_session.async_get_variable("name") or ""
+                    cwd = await side_session.async_get_variable("path") or ""
+                    job_name = await side_session.async_get_variable("jobName") or ""
+
+                    output_json({
+                        "session_id": side_session.session_id,
+                        "shorthand": side_shorthand,
+                        "name": name,
+                        "cwd": cwd,
+                        "job": job_name,
+                        "position": "right" if side_idx > session_idx else "left",
+                        "current_shorthand": current_shorthand,
+                        "location": {
+                            "window": window_idx + 1,
+                            "tab": tab_idx + 1,
+                            "pane": side_idx + 1
+                        }
+                    })
+                    return
+
+    output_error(f"Current session '{current_session_id}' not found", "SESSION_NOT_FOUND")
+
+
 def main():
     parser = argparse.ArgumentParser(description="iTerm2 client for MCP server")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    # Side-pane command (most commonly used)
+    subparsers.add_parser("side-pane", help="Get the side pane in the current tab")
 
     # Status command
     subparsers.add_parser("status", help="Check iTerm2 API status")
@@ -438,7 +512,15 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "status":
+    if args.command == "side-pane":
+        if not check_iterm2_module():
+            output_error(
+                "iterm2 Python module not installed. Run: pip install iterm2",
+                "MODULE_NOT_INSTALLED"
+            )
+        asyncio.run(get_side_pane())
+
+    elif args.command == "status":
         has_module = check_iterm2_module()
         api_enabled = check_api_enabled()
         current_session = get_current_session_from_env()

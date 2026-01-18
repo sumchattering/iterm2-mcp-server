@@ -95,6 +95,15 @@ function createServer() {
         return {
             tools: [
                 {
+                    name: "iterm2_side_pane",
+                    description: "Get the side pane in the current tab. Returns the pane to the right of the current pane, or the left if current is rightmost. Useful for interacting with an adjacent terminal pane.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {},
+                        required: [],
+                    },
+                },
+                {
                     name: "iterm2_status",
                     description: "Check if iTerm2 Python API is properly configured and ready to use",
                     inputSchema: {
@@ -213,6 +222,30 @@ function createServer() {
         const { name, arguments: args } = request.params;
         try {
             switch (name) {
+                case "iterm2_side_pane": {
+                    const result = await runPythonClient(["side-pane"]);
+                    if (result.error) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: ${result.message}`,
+                                },
+                            ],
+                        };
+                    }
+                    const location = result.location;
+                    let output = "Side Pane:\n";
+                    output += `- Shorthand: ${result.shorthand}\n`;
+                    output += `- Position: ${result.position} of current pane (${result.current_shorthand})\n`;
+                    output += `- Name: ${result.name || "(unnamed)"}\n`;
+                    output += `- Working Directory: ${result.cwd || "N/A"}\n`;
+                    output += `- Running Job: ${result.job || "N/A"}\n`;
+                    output += `- Location: Window ${location.window}, Tab ${location.tab}, Pane ${location.pane}\n`;
+                    return {
+                        content: [{ type: "text", text: output }],
+                    };
+                }
                 case "iterm2_status": {
                     const result = await runPythonClient(["status"]);
                     if (result.error) {
