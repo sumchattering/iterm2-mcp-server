@@ -11,6 +11,7 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/index.js",
+    "test": "python3 test/test_iterm2.py",
     "prepublishOnly": "npm run build"
   },
   "keywords": [
