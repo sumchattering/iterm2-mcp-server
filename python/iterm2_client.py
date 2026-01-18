@@ -234,6 +234,97 @@ async def get_current_pane():
     output_error(f"Current session '{current_session_id}' not found", "SESSION_NOT_FOUND")
 
 
+async def find_session(session_id):
+    """Find a session by ID. Returns (connection, session) or exits with error."""
+    import iterm2
+
+    try:
+        connection = await iterm2.Connection.async_create()
+    except Exception as e:
+        output_error(f"Failed to connect to iTerm2: {e}", "CONNECTION_FAILED")
+
+    app = await iterm2.async_get_app(connection)
+
+    for window in app.windows:
+        for tab in window.tabs:
+            for session in tab.sessions:
+                if session.session_id == session_id:
+                    return connection, session
+
+    output_error(f"Session '{session_id}' not found", "SESSION_NOT_FOUND")
+
+
+async def send_text(session_id, text, newline=True):
+    """Send text to a specific pane."""
+    connection, session = await find_session(session_id)
+
+    try:
+        text_to_send = text + "\n" if newline else text
+        await session.async_send_text(text_to_send)
+
+        output_json({
+            "success": True,
+            "session_id": session_id,
+            "text_sent": text,
+            "newline": newline
+        })
+    except Exception as e:
+        output_error(f"Failed to send text: {e}", "SEND_FAILED")
+
+
+async def send_control(session_id, control):
+    """Send a control character to a specific pane."""
+    # Control character mapping
+    control_chars = {
+        "c": "\u0003",  # Ctrl+C - Interrupt/SIGINT
+        "d": "\u0004",  # Ctrl+D - EOF/logout
+        "z": "\u001a",  # Ctrl+Z - Suspend/SIGTSTP
+        "l": "\u000c",  # Ctrl+L - Clear screen
+    }
+
+    if control not in control_chars:
+        output_error(
+            f"Unknown control character: {control}. Valid options: c, d, z, l",
+            "INVALID_CONTROL"
+        )
+
+    connection, session = await find_session(session_id)
+
+    try:
+        await session.async_send_text(control_chars[control])
+
+        output_json({
+            "success": True,
+            "session_id": session_id,
+            "control": control,
+            "description": {
+                "c": "Ctrl+C (SIGINT)",
+                "d": "Ctrl+D (EOF)",
+                "z": "Ctrl+Z (SIGTSTP)",
+                "l": "Ctrl+L (Clear)"
+            }[control]
+        })
+    except Exception as e:
+        output_error(f"Failed to send control character: {e}", "SEND_FAILED")
+
+
+async def split_pane(session_id, vertical=False):
+    """Split a pane horizontally or vertically."""
+    connection, session = await find_session(session_id)
+
+    try:
+        new_session = await session.async_split_pane(vertical=vertical)
+
+        output_json({
+            "success": True,
+            "original_session_id": session_id,
+            "new_session_id": new_session.session_id,
+            "split_direction": "vertical" if vertical else "horizontal"
+        })
+    except Exception as e:
+        output_error(f"Failed to split pane: {e}", "SPLIT_FAILED")
+
+
 def main():
     parser = argparse.ArgumentParser(description="iTerm2 client for MCP server")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
@@ -253,6 +344,31 @@ def main():
 
     # Current command
     subparsers.add_parser("current", help="Get current pane info")
+
+    # Send-text command
+    send_text_parser = subparsers.add_parser("send-text", help="Send text to a pane")
+    send_text_parser.add_argument("session_id", help="Session ID to send text to")
+    send_text_parser.add_argument("text", help="Text to send")
+    send_text_parser.add_argument(
+        "--no-newline", action="store_true",
+        help="Don't append newline (don't press Enter)"
+    )
+
+    # Send-control command
+    send_control_parser = subparsers.add_parser("send-control", help="Send control character to a pane")
+    send_control_parser.add_argument("session_id", help="Session ID to send control to")
+    send_control_parser.add_argument(
+        "control", choices=["c", "d", "z", "l"],
+        help="Control character: c=Ctrl+C, d=Ctrl+D, z=Ctrl+Z, l=Ctrl+L"
+    )
+
+    # Split command
+    split_parser = subparsers.add_parser("split", help="Split a pane")
+    split_parser.add_argument("session_id", help="Session ID to split")
+    split_parser.add_argument(
+        "--vertical", action="store_true",
+        help="Split vertically (default is horizontal)"
+    )
 
     args = parser.parse_args()
 
@@ -303,6 +419,30 @@ def main():
                 "MODULE_NOT_INSTALLED"
             )
         asyncio.run(get_current_pane())
+
+    elif args.command == "send-text":
+        if not check_iterm2_module():
+            output_error(
+                "iterm2 Python module not installed. Run: pip install iterm2",
+                "MODULE_NOT_INSTALLED"
+            )
+        asyncio.run(send_text(args.session_id, args.text, newline=not args.no_newline))
+
+    elif args.command == "send-control":
+        if not check_iterm2_module():
+            output_error(
+                "iterm2 Python module not installed. Run: pip install iterm2",
+                "MODULE_NOT_INSTALLED"
+            )
+        asyncio.run(send_control(args.session_id, args.control))
+
+    elif args.command == "split":
+        if not check_iterm2_module():
+            output_error(
+                "iterm2 Python module not installed. Run: pip install iterm2",
+                "MODULE_NOT_INSTALLED"
+            )
+        asyncio.run(split_pane(args.session_id, vertical=args.vertical))
 
     else:
         parser.print_help()

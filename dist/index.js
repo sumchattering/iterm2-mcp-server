@@ -144,6 +144,67 @@ function createServer() {
                         required: [],
                     },
                 },
+                {
+                    name: "iterm2_send_text",
+                    description: "Send text/commands to an iTerm2 pane as if typed by the user. Can optionally press Enter after the text.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            session_id: {
+                                type: "string",
+                                description: "The session ID of the pane to send text to (e.g., 'w0t0p0:ABC123...'). Use iterm2_list_panes to find session IDs.",
+                            },
+                            text: {
+                                type: "string",
+                                description: "The text or command to send to the pane.",
+                            },
+                            newline: {
+                                type: "boolean",
+                                description: "Whether to press Enter after the text (default: true). Set to false to type text without executing.",
+                                default: true,
+                            },
+                        },
+                        required: ["session_id", "text"],
+                    },
+                },
+                {
+                    name: "iterm2_send_control_character",
+                    description: "Send control characters like Ctrl+C, Ctrl+D, Ctrl+Z, or Ctrl+L to an iTerm2 pane. Useful for interrupting processes or clearing the screen.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            session_id: {
+                                type: "string",
+                                description: "The session ID of the pane to send the control character to.",
+                            },
+                            control: {
+                                type: "string",
+                                enum: ["c", "d", "z", "l"],
+                                description: "The control character to send: 'c' for Ctrl+C (interrupt/SIGINT), 'd' for Ctrl+D (EOF/logout), 'z' for Ctrl+Z (suspend/SIGTSTP), 'l' for Ctrl+L (clear screen).",
+                            },
+                        },
+                        required: ["session_id", "control"],
+                    },
+                },
+                {
+                    name: "iterm2_split_pane",
+                    description: "Split an iTerm2 pane horizontally or vertically, creating a new pane. Returns the session ID of the newly created pane.",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            session_id: {
+                                type: "string",
+                                description: "The session ID of the pane to split.",
+                            },
+                            vertical: {
+                                type: "boolean",
+                                description: "If true, split vertically (side by side). If false (default), split horizontally (top/bottom).",
+                                default: false,
+                            },
+                        },
+                        required: ["session_id"],
+                    },
+                },
             ],
         };
     });
@@ -271,6 +332,96 @@ function createServer() {
                                 text: result.message,
                             },
                         ],
+                    };
+                }
+                case "iterm2_send_text": {
+                    const { session_id: sessionId, text, newline } = args;
+                    if (!sessionId) {
+                        throw new McpError(ErrorCode.InvalidParams, "session_id is required");
+                    }
+                    if (!text) {
+                        throw new McpError(ErrorCode.InvalidParams, "text is required");
+                    }
+                    const pythonArgs = ["send-text", sessionId, text];
+                    if (newline === false) {
+                        pythonArgs.push("--no-newline");
+                    }
+                    const result = await runPythonClient(pythonArgs);
+                    if (result.error) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: ${result.message}`,
+                                },
+                            ],
+                        };
+                    }
+                    let output = `Text sent to pane ${sessionId}:\n`;
+                    output += `- Text: "${result.text_sent}"\n`;
+                    output += `- Newline: ${result.newline ? "Yes (Enter pressed)" : "No"}`;
+                    return {
+                        content: [{ type: "text", text: output }],
+                    };
+                }
+                case "iterm2_send_control_character": {
+                    const { session_id: sessionId, control } = args;
+                    if (!sessionId) {
+                        throw new McpError(ErrorCode.InvalidParams, "session_id is required");
+                    }
+                    if (!control) {
+                        throw new McpError(ErrorCode.InvalidParams, "control is required");
+                    }
+                    const result = await runPythonClient([
+                        "send-control",
+                        sessionId,
+                        control,
+                    ]);
+                    if (result.error) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: ${result.message}`,
+                                },
+                            ],
+                        };
+                    }
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Sent ${result.description} to pane ${sessionId}`,
+                            },
+                        ],
+                    };
+                }
+                case "iterm2_split_pane": {
+                    const { session_id: sessionId, vertical } = args;
+                    if (!sessionId) {
+                        throw new McpError(ErrorCode.InvalidParams, "session_id is required");
+                    }
+                    const pythonArgs = ["split", sessionId];
+                    if (vertical === true) {
+                        pythonArgs.push("--vertical");
+                    }
+                    const result = await runPythonClient(pythonArgs);
+                    if (result.error) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: ${result.message}`,
+                                },
+                            ],
+                        };
+                    }
+                    let output = `Pane split successfully!\n`;
+                    output += `- Original pane: ${result.original_session_id}\n`;
+                    output += `- New pane: ${result.new_session_id}\n`;
+                    output += `- Direction: ${result.split_direction}`;
+                    return {
+                        content: [{ type: "text", text: output }],
                     };
                 }
                 default:
