@@ -168,7 +168,7 @@ async def read_pane(session_id):
 
         for i in range(contents.number_of_lines):
             line = contents.line(i)
-            lines.append(line.string.rstrip())
+            lines.append(line.string.replace('\x00', '').rstrip())
 
         # Remove trailing empty lines
         while lines and not lines[-1]:

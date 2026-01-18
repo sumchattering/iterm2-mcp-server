@@ -100,6 +100,31 @@ Get information about the current iTerm2 pane where the MCP server is running.
 
 Enable the iTerm2 Python API in preferences. Note: iTerm2 must be restarted after enabling.
 
+### `iterm2_send_text`
+
+Send text or commands to an iTerm2 pane as if typed by the user.
+
+**Parameters:**
+- `session_id` (required): The session ID of the pane to send text to
+- `text` (required): The text or command to send
+- `newline` (optional, default: true): Whether to press Enter after the text
+
+### `iterm2_send_control_character`
+
+Send control characters like Ctrl+C, Ctrl+D, Ctrl+Z, or Ctrl+L to an iTerm2 pane.
+
+**Parameters:**
+- `session_id` (required): The session ID of the pane
+- `control` (required): The control character to send: `c` (interrupt), `d` (EOF), `z` (suspend), `l` (clear)
+
+### `iterm2_split_pane`
+
+Split an iTerm2 pane horizontally or vertically, creating a new pane.
+
+**Parameters:**
+- `session_id` (required): The session ID of the pane to split
+- `vertical` (optional, default: false): If true, split vertically (side by side)
+
 ## Example Usage
 
 Once configured, you can ask Claude:
@@ -108,6 +133,9 @@ Once configured, you can ask Claude:
 - "Can you see the output from my npm server in the other pane?"
 - "Read the contents of the terminal running my Python script"
 - "List all my open terminal panes"
+- "Run `npm test` in my other terminal"
+- "Stop the process running in that pane" (sends Ctrl+C)
+- "Split my terminal and run the server in the new pane"
 
 ## Troubleshooting
 
@@ -160,3 +188,15 @@ MIT License - see [LICENSE](LICENSE) for details.
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+## Future Improvements
+
+The following features are being considered for future releases. Feedback welcome!
+
+- **Shorthand session IDs**: Support `w0t1p0` format instead of full UUIDs for easier use
+- **Create tab/window**: `iterm2_create_tab` and `iterm2_create_window` tools
+- **Close pane**: `iterm2_close_pane` tool to close panes programmatically
+- **Focus pane**: `iterm2_focus_pane` to bring a specific pane to the foreground
+- **Wait for prompt**: `iterm2_wait_for_prompt` to wait until a command finishes executing
+- **Set pane title**: Ability to set custom titles for panes
+- **Performance optimization**: Persistent Python process instead of spawning per request
