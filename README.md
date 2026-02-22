@@ -6,6 +6,7 @@ An MCP (Model Context Protocol) server that allows AI assistants like Claude to 
 
 - **List all panes**: See all open iTerm2 windows, tabs, and panes with their working directories and running jobs
 - **Read pane contents**: Get the screen buffer text from any pane
+- **Glimpse recent output**: Read only the bottom lines, anchored at the last non-empty line
 - **Current pane detection**: Automatically detects which pane the server is running in
 - **Status checking**: Verify that iTerm2 Python API is properly configured
 
@@ -84,6 +85,16 @@ Read the screen buffer contents of a specific pane.
 **Parameters:**
 - `session_id` (required): The pane ID using shorthand like `t3p1` (tab 3, pane 1) or `w1t3p1`
 
+### `iterm2_glimpse_pane`
+
+Read only the bottom part of the visible screen buffer for a specific pane.
+Trailing empty lines are ignored first, then the last `tail_lines` are returned.
+This reads visible screen contents, not scrollback history.
+
+**Parameters:**
+- `session_id` (required): The pane ID using shorthand like `t3p1` (tab 3, pane 1) or `w1t3p1`
+- `tail_lines` (optional, default: 10, range: 1-200): Number of lines to return from the bottom
+
 ### `iterm2_send_text`
 
 Send text or commands to an iTerm2 pane as if typed by the user.
@@ -139,6 +150,7 @@ Once installed, Claude Code can see and interact with your terminal panes. Here 
 ### Asking about panes
 
 - "What's in tab 3?" - Claude will read the contents of tab 3
+- "Give me a quick glimpse of t3p1" - Reads a small tail from the bottom of the pane
 - "What's running in the pane next to you?" - Claude can identify adjacent panes
 - "Show me all my terminal tabs" - Lists all panes with their shorthand IDs
 - "What's the output of my server?" - Claude can find and read server output

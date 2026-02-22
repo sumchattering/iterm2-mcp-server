@@ -207,6 +207,58 @@ def test_read_pane(shorthand):
     test("contents is string", isinstance(result.get("contents"), str))
 
 
+def test_glimpse_pane(shorthand):
+    """Test the glimpse command."""
+    print("\n📋 Testing: glimpse")
+
+    if not shorthand:
+        skip("glimpse pane", "no shorthand available")
+        return
+
+    result, code = run_command(["glimpse", shorthand])
+
+    if result.get("error"):
+        test("glimpse command succeeds", False, result.get("message", "Unknown error"))
+        return
+
+    test("glimpse command succeeds", code == 0)
+    test("has session_id", "session_id" in result)
+    test("has shorthand", "shorthand" in result)
+    test("has contents", "contents" in result)
+    test("contents is string", isinstance(result.get("contents"), str))
+    test("has tail_lines", "tail_lines" in result and isinstance(result.get("tail_lines"), int))
+    test("default tail_lines is 10", result.get("tail_lines") == 10)
+    test("has total_lines", "total_lines" in result and isinstance(result.get("total_lines"), int))
+    test("has returned_lines", "returned_lines" in result and isinstance(result.get("returned_lines"), int))
+    test("has truncated", "truncated" in result and isinstance(result.get("truncated"), bool))
+
+    total_lines = result.get("total_lines", 0)
+    returned_lines = result.get("returned_lines", 0)
+    test("returned_lines <= total_lines", returned_lines <= total_lines)
+    test("returned_lines <= tail_lines", returned_lines <= result.get("tail_lines", 0))
+
+    contents = result.get("contents", "")
+    actual_lines = len(contents.splitlines()) if contents else 0
+    test("returned_lines matches contents line count", actual_lines == returned_lines)
+
+
+def test_glimpse_invalid_tail_lines(shorthand):
+    """Test glimpse argument validation."""
+    print("\n📋 Testing: glimpse validation")
+
+    if not shorthand:
+        skip("glimpse validation", "no shorthand available")
+        return
+
+    for invalid in ["0", "-1", "201", "abc"]:
+        result, code = run_command(["glimpse", shorthand, "--tail-lines", invalid])
+        test(
+            f"tail-lines {invalid} is rejected",
+            result.get("error") == "INVALID_PARAMS" and code != 0,
+            result.get("message", "Expected INVALID_PARAMS error"),
+        )
+
+
 def test_send_text(shorthand):
     """Test the send-text command (without newline to avoid executing)."""
     print("\n📋 Testing: send-text")
@@ -301,6 +353,8 @@ def main():
             pass
 
     test_read_pane(test_shorthand)
+    test_glimpse_pane(test_shorthand)
+    test_glimpse_invalid_tail_lines(test_shorthand)
     test_send_text(test_shorthand)
     test_send_control(test_shorthand)
     test_split_pane(test_shorthand)

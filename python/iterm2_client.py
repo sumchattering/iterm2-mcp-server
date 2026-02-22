@@ -140,6 +140,35 @@ def output_error(message, code="ERROR"):
     sys.exit(1)
 
 
+def parse_tail_lines(value):
+    """Validate and parse tail_lines argument."""
+    try:
+        tail_lines = int(value)
+    except (TypeError, ValueError):
+        output_error("tail_lines must be an integer", "INVALID_PARAMS")
+
+    if tail_lines < 1 or tail_lines > 200:
+        output_error("tail_lines must be between 1 and 200", "INVALID_PARAMS")
+
+    return tail_lines
+
+
+async def read_visible_lines(session):
+    """Read visible screen lines and trim trailing empty lines."""
+    contents = await session.async_get_screen_contents()
+    lines = []
+
+    for i in range(contents.number_of_lines):
+        line = contents.line(i)
+        lines.append(line.string.replace('\x00', '').rstrip())
+
+    # Remove trailing empty lines so tailing anchors at the last line with text.
+    while lines and not lines[-1]:
+        lines.pop()
+
+    return lines
+
+
 async def list_panes():
     """List all iTerm2 panes with their details."""
     import iterm2
@@ -217,33 +246,11 @@ async def list_panes():
 
 async def read_pane(session_id_or_shorthand):
     """Read the contents of a specific pane."""
-    import iterm2
-
-    try:
-        connection = await iterm2.Connection.async_create()
-    except Exception as e:
-        output_error(
-            f"Failed to connect to iTerm2: {e}",
-            "CONNECTION_FAILED"
-        )
-
-    app = await iterm2.async_get_app(connection)
-
-    # Resolve the session (supports both shorthand and full UUID)
-    target_session, shorthand = await resolve_session_id(app, session_id_or_shorthand)
+    _, target_session, shorthand = await find_session(session_id_or_shorthand)
 
     # Read screen contents
     try:
-        contents = await target_session.async_get_screen_contents()
-        lines = []
-
-        for i in range(contents.number_of_lines):
-            line = contents.line(i)
-            lines.append(line.string.replace('\x00', '').rstrip())
-
-        # Remove trailing empty lines
-        while lines and not lines[-1]:
-            lines.pop()
+        lines = await read_visible_lines(target_session)
 
         name = await target_session.async_get_variable("name") or ""
         cwd = await target_session.async_get_variable("path") or ""
@@ -258,6 +265,33 @@ async def read_pane(session_id_or_shorthand):
 
     except Exception as e:
         output_error(f"Failed to read session contents: {e}", "READ_FAILED")
+
+
+async def glimpse_pane(session_id_or_shorthand, tail_lines=10):
+    """Read the bottom N lines from a pane, anchored at the last non-empty line."""
+    _, target_session, shorthand = await find_session(session_id_or_shorthand)
+
+    try:
+        lines = await read_visible_lines(target_session)
+        total_lines = len(lines)
+        tail = lines[-tail_lines:] if lines else []
+
+        name = await target_session.async_get_variable("name") or ""
+        cwd = await target_session.async_get_variable("path") or ""
+
+        output_json({
+            "session_id": target_session.session_id,
+            "shorthand": shorthand,
+            "name": name,
+            "cwd": cwd,
+            "contents": "\n".join(tail),
+            "tail_lines": tail_lines,
+            "total_lines": total_lines,
+            "returned_lines": len(tail),
+            "truncated": total_lines > len(tail)
+        })
+    except Exception as e:
+        output_error(f"Failed to glimpse session contents: {e}", "READ_FAILED")
 
 
 async def get_current_pane():
@@ -489,6 +523,15 @@ def main():
     read_parser = subparsers.add_parser("read", help="Read pane contents")
     read_parser.add_argument("session_id", help="Session ID to read")
 
+    # Glimpse command
+    glimpse_parser = subparsers.add_parser("glimpse", help="Read bottom lines from pane contents")
+    glimpse_parser.add_argument("session_id", help="Session ID to read")
+    glimpse_parser.add_argument(
+        "--tail-lines",
+        default="10",
+        help="Number of lines to read from the bottom (1-200, default: 10)"
+    )
+
     # Current command
     subparsers.add_parser("current", help="Get current pane info")
 
@@ -566,6 +609,15 @@ def main():
                 "MODULE_NOT_INSTALLED"
             )
         asyncio.run(read_pane(args.session_id))
+
+    elif args.command == "glimpse":
+        if not check_iterm2_module():
+            output_error(
+                "iterm2 Python module not installed. Run: pip install iterm2",
+                "MODULE_NOT_INSTALLED"
+            )
+        tail_lines = parse_tail_lines(args.tail_lines)
+        asyncio.run(glimpse_pane(args.session_id, tail_lines))
 
     elif args.command == "current":
         if not check_iterm2_module():
