@@ -153,22 +153,6 @@ def parse_tail_lines(value):
     return tail_lines
 
 
-async def read_visible_lines(session):
-    """Read visible screen lines and trim trailing empty lines."""
-    contents = await session.async_get_screen_contents()
-    lines = []
-
-    for i in range(contents.number_of_lines):
-        line = contents.line(i)
-        lines.append(line.string.replace('\x00', '').rstrip())
-
-    # Remove trailing empty lines so tailing anchors at the last line with text.
-    while lines and not lines[-1]:
-        lines.pop()
-
-    return lines
-
-
 async def list_panes():
     """List all iTerm2 panes with their details."""
     import iterm2
@@ -246,11 +230,33 @@ async def list_panes():
 
 async def read_pane(session_id_or_shorthand):
     """Read the contents of a specific pane."""
-    _, target_session, shorthand = await find_session(session_id_or_shorthand)
+    import iterm2
+
+    try:
+        connection = await iterm2.Connection.async_create()
+    except Exception as e:
+        output_error(
+            f"Failed to connect to iTerm2: {e}",
+            "CONNECTION_FAILED"
+        )
+
+    app = await iterm2.async_get_app(connection)
+
+    # Resolve the session (supports both shorthand and full UUID)
+    target_session, shorthand = await resolve_session_id(app, session_id_or_shorthand)
 
     # Read screen contents
     try:
-        lines = await read_visible_lines(target_session)
+        contents = await target_session.async_get_screen_contents()
+        lines = []
+
+        for i in range(contents.number_of_lines):
+            line = contents.line(i)
+            lines.append(line.string.replace('\x00', '').rstrip())
+
+        # Remove trailing empty lines
+        while lines and not lines[-1]:
+            lines.pop()
 
         name = await target_session.async_get_variable("name") or ""
         cwd = await target_session.async_get_variable("path") or ""
@@ -272,7 +278,17 @@ async def glimpse_pane(session_id_or_shorthand, tail_lines=10):
     _, target_session, shorthand = await find_session(session_id_or_shorthand)
 
     try:
-        lines = await read_visible_lines(target_session)
+        contents = await target_session.async_get_screen_contents()
+        lines = []
+
+        for i in range(contents.number_of_lines):
+            line = contents.line(i)
+            lines.append(line.string.replace('\x00', '').rstrip())
+
+        # Remove trailing empty lines so tailing anchors at the last line with text.
+        while lines and not lines[-1]:
+            lines.pop()
+
         total_lines = len(lines)
         tail = lines[-tail_lines:] if lines else []
 
