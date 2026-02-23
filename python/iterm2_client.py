@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import json
 import os
+import shlex
 import subprocess
 import sys
 
@@ -140,6 +141,168 @@ def output_error(message, code="ERROR"):
     sys.exit(1)
 
 
+def normalize_tty(tty):
+    """Normalize a tty path like /dev/ttys001 to ttys001."""
+    if not tty:
+        return ""
+    tty = tty.strip()
+    if tty.startswith("/dev/"):
+        return tty[5:]
+    return tty
+
+
+def infer_job_name(command_line, comm):
+    """Infer a user-friendly job name from command details."""
+    comm_base = os.path.basename(comm.lstrip("-")) if comm else ""
+
+    if not command_line:
+        return comm_base
+
+    try:
+        tokens = shlex.split(command_line)
+    except ValueError:
+        tokens = command_line.split()
+
+    if not tokens:
+        return comm_base
+
+    exe_base = os.path.basename(tokens[0].lstrip("-"))
+
+    # Try to produce useful labels for runtime wrappers (node/python/etc).
+    runtime_executables = {
+        "node", "nodejs", "python", "python3", "ruby", "perl",
+        "bash", "zsh", "sh", "fish", "env", "npm", "npx", "pnpm", "yarn",
+        "bun", "deno"
+    }
+    if exe_base in runtime_executables:
+        for token in tokens[1:]:
+            if not token or token == "--" or token.startswith("-"):
+                continue
+
+            candidate = os.path.basename(token)
+            candidate = os.path.splitext(candidate)[0]
+            if candidate and candidate not in {"index", "cli", "main", "bin", "env"}:
+                return candidate
+
+    return exe_base or comm_base
+
+
+def get_pid_cwd(pid):
+    """Get working directory for a PID using lsof."""
+    try:
+        result = subprocess.run(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+        if result.returncode != 0:
+            return ""
+
+        for line in result.stdout.splitlines():
+            if line.startswith("n"):
+                return line[1:].strip()
+    except Exception:
+        return ""
+
+    return ""
+
+
+def get_foreground_process_info(tty):
+    """Best-effort foreground process lookup for a tty.
+
+    Returns (job_name, cwd, pid) with empty strings/None on failure.
+    """
+    tty_name = normalize_tty(tty)
+    if not tty_name:
+        return "", "", None
+
+    # Gather processes attached to this tty, including tty foreground process group.
+    try:
+        result = subprocess.run(
+            ["ps", "-t", tty_name, "-o", "pid=,pgid=,tpgid=,comm=,command="],
+            capture_output=True,
+            text=True,
+            timeout=1
+        )
+    except Exception:
+        return "", "", None
+
+    if result.returncode != 0:
+        return "", "", None
+
+    processes = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(None, 4)
+        if len(parts) < 5:
+            continue
+
+        try:
+            pid = int(parts[0])
+            pgid = int(parts[1])
+            tpgid = int(parts[2])
+        except ValueError:
+            continue
+
+        processes.append({
+            "pid": pid,
+            "pgid": pgid,
+            "tpgid": tpgid,
+            "comm": parts[3].strip(),
+            "command": parts[4].strip(),
+        })
+
+    if not processes:
+        return "", "", None
+
+    # tpgid is the terminal's foreground process group and is repeated on each row.
+    tpgids = [p["tpgid"] for p in processes if p["tpgid"] > 0]
+    fg_pgid = tpgids[0] if tpgids else None
+
+    selected = None
+    if fg_pgid is not None:
+        fg_processes = [p for p in processes if p["pgid"] == fg_pgid]
+        if fg_processes:
+            leaders = [p for p in fg_processes if p["pid"] == p["pgid"]]
+            if leaders:
+                selected = max(leaders, key=lambda p: p["pid"])
+            else:
+                selected = max(fg_processes, key=lambda p: p["pid"])
+
+    if not selected:
+        # Fallback: newest process attached to tty.
+        selected = max(processes, key=lambda p: p["pid"])
+
+    pid = selected["pid"]
+    comm = selected["comm"]
+    command_line = selected["command"]
+    job_name = infer_job_name(command_line, comm)
+    cwd = get_pid_cwd(pid)
+
+    return job_name, cwd, pid
+
+
+async def get_session_runtime_info(session):
+    """Get session metadata with foreground process/cwd fallback."""
+    name = await session.async_get_variable("name") or ""
+    tty = await session.async_get_variable("tty") or ""
+    cwd = await session.async_get_variable("path") or ""
+    job_name = await session.async_get_variable("jobName") or ""
+
+    fg_job_name, fg_cwd, _ = get_foreground_process_info(tty)
+    if fg_job_name:
+        job_name = fg_job_name
+    if fg_cwd:
+        cwd = fg_cwd
+
+    return {
+        "name": name,
+        "tty": tty,
+        "cwd": cwd,
+        "job_name": job_name,
+    }
+
+
 def parse_tail_lines(value):
     """Validate and parse tail_lines argument."""
     try:
@@ -202,20 +365,16 @@ async def list_panes():
                 session_id = session.session_id
                 shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
 
-                # Get session details
-                name = await session.async_get_variable("name") or ""
-                tty = await session.async_get_variable("tty") or ""
-                cwd = await session.async_get_variable("path") or ""
-                job_name = await session.async_get_variable("jobName") or ""
+                runtime = await get_session_runtime_info(session)
 
                 session_data = {
                     "index": session_idx + 1,  # 1-based
                     "id": session_id,
                     "shorthand": shorthand,
-                    "name": name,
-                    "tty": tty,
-                    "cwd": cwd,
-                    "job": job_name,
+                    "name": runtime["name"],
+                    "tty": runtime["tty"],
+                    "cwd": runtime["cwd"],
+                    "job": runtime["job_name"],
                     "is_current": session_id == current_session_id
                 }
 
@@ -333,19 +492,16 @@ async def get_current_pane():
         for tab_idx, tab in enumerate(window.tabs):
             for session_idx, session in enumerate(tab.sessions):
                 if session.session_id == current_session_id:
-                    name = await session.async_get_variable("name") or ""
-                    tty = await session.async_get_variable("tty") or ""
-                    cwd = await session.async_get_variable("path") or ""
-                    job_name = await session.async_get_variable("jobName") or ""
+                    runtime = await get_session_runtime_info(session)
                     shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
 
                     output_json({
                         "session_id": current_session_id,
                         "shorthand": shorthand,
-                        "name": name,
-                        "tty": tty,
-                        "cwd": cwd,
-                        "job": job_name,
+                        "name": runtime["name"],
+                        "tty": runtime["tty"],
+                        "cwd": runtime["cwd"],
+                        "job": runtime["job_name"],
                         "location": {
                             "window": window_idx + 1,  # 1-based
                             "tab": tab_idx + 1,        # 1-based
@@ -495,17 +651,14 @@ async def get_side_pane():
                     side_shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{side_idx + 1}"
                     current_shorthand = f"w{window_idx + 1}t{tab_idx + 1}p{session_idx + 1}"
 
-                    # Get side pane details
-                    name = await side_session.async_get_variable("name") or ""
-                    cwd = await side_session.async_get_variable("path") or ""
-                    job_name = await side_session.async_get_variable("jobName") or ""
+                    runtime = await get_session_runtime_info(side_session)
 
                     output_json({
                         "session_id": side_session.session_id,
                         "shorthand": side_shorthand,
-                        "name": name,
-                        "cwd": cwd,
-                        "job": job_name,
+                        "name": runtime["name"],
+                        "cwd": runtime["cwd"],
+                        "job": runtime["job_name"],
                         "position": "right" if side_idx > session_idx else "left",
                         "current_shorthand": current_shorthand,
                         "location": {
