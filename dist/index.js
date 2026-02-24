@@ -78,6 +78,18 @@ function formatPaneList(data) {
     }
     return output;
 }
+function parseTailLines(value) {
+    if (value === undefined) {
+        return 10;
+    }
+    if (typeof value !== "number" || !Number.isInteger(value)) {
+        throw new McpError(ErrorCode.InvalidParams, "tail_lines must be an integer");
+    }
+    if (value < 1 || value > 200) {
+        throw new McpError(ErrorCode.InvalidParams, "tail_lines must be between 1 and 200");
+    }
+    return value;
+}
 /**
  * Create and configure the MCP server
  */
@@ -130,6 +142,27 @@ function createServer() {
                             session_id: {
                                 type: "string",
                                 description: "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2' (window 1, tab 5, pane 2). Numbers are 1-based to match iTerm2's UI.",
+                            },
+                        },
+                        required: ["session_id"],
+                    },
+                },
+                {
+                    name: "iterm2_glimpse_pane",
+                    description: "Read the bottom lines from a specific iTerm2 pane. Trailing empty lines are ignored first, then up to tail_lines are returned from the visible screen buffer (not scrollback).",
+                    inputSchema: {
+                        type: "object",
+                        properties: {
+                            session_id: {
+                                type: "string",
+                                description: "The pane ID - use shorthand like 't5p2' (tab 5, pane 2) or 'w1t5p2' (window 1, tab 5, pane 2). Numbers are 1-based to match iTerm2's UI.",
+                            },
+                            tail_lines: {
+                                type: "integer",
+                                description: "Number of lines to return from the bottom, anchored to the last non-empty visible line.",
+                                minimum: 1,
+                                maximum: 200,
+                                default: 10,
                             },
                         },
                         required: ["session_id"],
@@ -317,6 +350,51 @@ function createServer() {
                         output += `Name: ${result.name}\n`;
                     if (result.cwd)
                         output += `CWD: ${result.cwd}\n`;
+                    output += "=".repeat(60) + "\n\n";
+                    output += result.contents;
+                    return {
+                        content: [{ type: "text", text: output }],
+                    };
+                }
+                case "iterm2_glimpse_pane": {
+                    const { session_id: sessionId, tail_lines: tailLinesRaw } = args;
+                    if (!sessionId) {
+                        throw new McpError(ErrorCode.InvalidParams, "session_id is required");
+                    }
+                    const tailLines = parseTailLines(tailLinesRaw);
+                    const result = await runPythonClient([
+                        "glimpse",
+                        sessionId,
+                        "--tail-lines",
+                        String(tailLines),
+                    ]);
+                    if (result.error) {
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Error: ${result.message}`,
+                                },
+                            ],
+                        };
+                    }
+                    const totalLines = typeof result.total_lines === "number" ? result.total_lines : null;
+                    const returnedLines = typeof result.returned_lines === "number"
+                        ? result.returned_lines
+                        : null;
+                    let output = `Pane Glimpse (${result.shorthand}):\n`;
+                    output += "=".repeat(60) + "\n";
+                    if (result.name)
+                        output += `Name: ${result.name}\n`;
+                    if (result.cwd)
+                        output += `CWD: ${result.cwd}\n`;
+                    if (returnedLines !== null && totalLines !== null) {
+                        output += `Lines: ${returnedLines} returned`;
+                        if (totalLines > returnedLines) {
+                            output += ` (${totalLines} total visible lines after trimming trailing blanks)`;
+                        }
+                        output += "\n";
+                    }
                     output += "=".repeat(60) + "\n\n";
                     output += result.contents;
                     return {
